@@ -75,24 +75,30 @@ Each snap is needed as **two files**: `<name>.snap` and `<name>.assert`
 Bundled as: `snaps-amd64.tar.gz` and `snaps-arm64.tar.gz` — see §3.2 for the
 script that produces them.
 
-### 1.4 LXD base image(s) for rockcraft (per architecture)
+### 1.4 Pre-baked rockcraft base instance image (per architecture)
 
-`rockcraft pack` builds inside LXD containers and pulls a base image
-(e.g. an Ubuntu buildd image) from a remote on first use — per VM, that is a
-few hundred MB over the network. Cache it:
+`rockcraft pack` builds inside LXD containers. On first use per VM,
+craft-providers resolves an Ubuntu buildd image **by alias** from a remote
+(`https://cloud-images.ubuntu.com/buildd/releases`) and runs apt-heavy setup
+inside the container. Verified by dry run: a fingerprint-identical
+`lxc image import` is *ignored* — alias resolution always needs the remote,
+and LXD 6 only allows **https** simplestreams remotes (impractical to mirror
+on a LAN). What *is* reused with zero network access is an **existing base
+instance**, provided it is STOPPED and marked `FINISHED`.
 
-* On a golden VM, run the workshop's first `rockcraft pack` exercise once
-  with internet, then `lxc image list` to see what was pulled.
-* Export each such image: `lxc image export <fingerprint> <name>.tar.gz`.
-* Record `filename` + `alias` pairs in `manifest.txt` (see §3.3).
+So the cache ships a **pre-baked base instance image**: the fully set-up
+build environment, published from a golden VM (§3.3), plus the exact
+instance name/fingerprint recorded in `manifest.txt`. The local cloud-init
+instantiates it in the `rockcraft` LXD project with the right metadata,
+getting `rockcraft pack` past instance creation with no network at all.
+(~635 MB per arch.)
 
-The local cloud-init imports these so first builds start fast.
-**Verify in the dry run (§5) that a fully-offline `rockcraft pack` works** —
-depending on how rockcraft resolves its remote, it may still try to check the
-remote for updates; the dry run tells you definitively. If it does insist on
-the remote, the fallback is simply that the first build per VM needs WAN once
-(document it for participants), or pre-seed and ensure exercises reference
-the locally imported alias.
+**Not covered here (pending organizer decision):** two further build-time
+dependencies — the OCI base image pull (`public.ecr.aws`, for rocks with
+`base: ubuntu@...`) and Ubuntu archive access (apt, also used by
+`chisel cut`). Making builds 100% offline additionally needs an OCI registry
+mirror and an apt proxy on the cache; the dry run (§5) shows exactly how far
+a build gets without them.
 
 ### 1.5 `chisel-releases` git mirror
 
@@ -108,9 +114,8 @@ as well as the setup files. So the repo is also mirrored to the cache as a
 second bare git repo, and the local cloud-init clones it into the VM at
 `~/chisel-workshop-resources`.
 
-* Source: the public URL the speaker publishes the repo to (placeholder
-  `https://github.com/Soundarya03/chisel-workshop-resources.git` in §3.4 — get
-  the real one from the speaker).
+* Source: `https://github.com/Soundarya03/chisel-workshop-resources.git`
+  (see §3.4 for the mirror commands).
 * **Refresh matters:** session content is still being committed as the event
   approaches. Re-sync this mirror shortly before the session (§3.4 shows
   how); if it changes mid-session, participants can simply `git pull` inside
@@ -118,13 +123,6 @@ second bare git repo, and the local cloud-init clones it into the VM at
 * The edited `cloud-init-local-cache.yaml` (with `CACHE_BASE` filled in) is
   *additionally* copied to the cache root so participants can download just
   that one file onto their host before launching (§6).
-
-### 1.7 Conditional: Docker Hub images
-
-If any exercise does `docker pull <image>`, those images should be cached
-too (`docker pull` + `docker save -o name.tar <image>` on a connected
-machine; participants `docker load -i name.tar`, or you run a `registry:2`
-mirror container). Check with the final exercise list; skip if unused.
 
 ---
 
@@ -149,7 +147,7 @@ chisel-workshop-cache/
 │   ├── snaps-amd64.tar.gz
 │   └── snaps-arm64.tar.gz
 ├── lxd-images/
-│   ├── amd64/   (<name>.tar.gz files + manifest.txt)
+│   ├── amd64/   (rockcraft-base-baked.tar.gz + manifest.txt)
 │   └── arm64/   (same)
 ├── git/
 │   ├── chisel-releases.git/          # bare mirror, update-server-info run
@@ -233,22 +231,57 @@ Notes:
   `cloud-init-local-cache.yaml` consumes (`snap ack` + ordered
   `snap install`).
 
-### 3.3 LXD images for rockcraft
+### 3.3 Pre-baked rockcraft base instance image
 
-On the golden VM (§3.2), after running the workshop's first `rockcraft pack`
-once:
+On a golden VM of the target architecture (§3.2 doubles as one), with
+internet:
 
-```bash
-ARCH="$(dpkg --print-architecture)"
-mkdir -p "lxd-images/$ARCH"
-lxc image list
-# For each image the exercise used (note fingerprint + alias from the output):
-lxc image export <FINGERPRINT> "lxd-images/$ARCH/<sensible-name>.tar.gz"
-echo "<sensible-name>.tar.gz <alias-from-lxc-image-list>" \
-  >> "lxd-images/$ARCH/manifest.txt"
-```
+1. Run a minimal `rockcraft pack` once — this creates and sets up the base
+   instance in the `rockcraft` LXD project:
 
-Repeat per architecture if both are needed (build the exercise once on each).
+   ```bash
+   mkdir ~/base-bake && cd ~/base-bake
+   cat > rockcraft.yaml <<'EOF'
+   name: base-bake
+   base: ubuntu@24.04
+   version: "0.1"
+   summary: base bake
+   description: minimal rock to create the rockcraft base instance
+   platforms:
+     amd64:      # use arm64 on an arm64 machine
+   parts:
+     nothing:
+       plugin: nil
+   EOF
+   rockcraft pack
+   ```
+
+2. Publish the fully set-up base instance as an image, and harvest the exact
+   values (they vary with rockcraft/image versions — never hardcode):
+
+   ```bash
+   ARCH="$(dpkg --print-architecture)"
+   mkdir -p "lxd-images/$ARCH"
+   BASE_NAME="$(lxc list --project rockcraft -c n --format csv | grep '^base-instance-')"
+   echo "base instance: $BASE_NAME"
+   lxc publish "$BASE_NAME" --project rockcraft    # note the new fingerprint
+   FP="$(lxc image list --project rockcraft -c f --format csv | head -1)"
+   # If several images are listed, use the fingerprint of the NEWEST (the
+   # freshly published base instance), not the plain buildd one.
+   lxc image export "$FP" --project rockcraft "lxd-images/$ARCH/rockcraft-base-baked"
+   # lxc appends .tar.gz itself; keep the name rockcraft-base-baked.tar.gz
+
+   cat > "lxd-images/$ARCH/manifest.txt" <<EOF
+   ROCKCRAFT_BASE_IMAGE_FILE="rockcraft-base-baked.tar.gz"
+   ROCKCRAFT_BASE_IMAGE_FINGERPRINT="$FP"
+   ROCKCRAFT_BASE_INSTANCE_NAME="$BASE_NAME"
+   EOF
+   ```
+
+3. Repeat per architecture (bake once on amd64 and once on arm64).
+
+`manifest.txt` is sourced as shell by the VM setup script — keep the
+`KEY="value"` format exactly.
 
 ### 3.4 Git mirrors (two repos)
 
@@ -309,7 +342,7 @@ Practicalities:
 
 ---
 
-## 5. Dry-run checklist (organizers + speaker, ~1 week before)
+## 5. Dry-run checklist
 
 - [ ] Every artifact in §2 fetched once through the cache from a client
       machine; `sha256sum --check` passes.
@@ -324,8 +357,9 @@ Practicalities:
       chisel; `docker ps` works as the ubuntu user; `chisel --version` runs;
       `~/chisel-releases` and `~/chisel-workshop-resources` both cloned.
 - [ ] **With the host's WAN disabled**, run the workshop's first
-      `rockcraft pack` exercise inside the VM end-to-end. This is the
-      definitive test of the LXD-image seeding (§1.4).
+      `rockcraft pack` exercise inside the VM. Instance creation must work
+      fully offline (baked base, §1.4); expect the build to stop only at the
+      OCI base-image pull / apt archive unless those proxies are added later.
 - [ ] Fresh clones from both LAN git mirrors work.
 - [ ] Full setup timed (target: under ~10 minutes per participant on LAN).
 
@@ -343,16 +377,17 @@ Practicalities:
      sudo snap ack multipass.assert
      sudo snap install multipass.snap
      ```
-2. Fetch the cloud-init and launch the VM **from the cached image**:
+2. Fetch the image + cloud-init script, then launch **from the local files**
+   (Multipass rewrites `http://` URLs to `https://`, which a plain local
+   HTTP server can't answer — `file://` avoids that):
    ```bash
+   # Intel/AMD hosts (arm64 hosts: fetch the arm64 .img instead)
+   curl -fLO http://<cache-ip>:8000/images/ubuntu-26.04-server-cloudimg-amd64.img
    curl -fLO http://<cache-ip>:8000/cloud-init-local-cache.yaml
 
-   # Intel/AMD hosts:
-   multipass launch http://<cache-ip>:8000/images/ubuntu-26.04-server-cloudimg-amd64.img \
+   multipass launch file://$PWD/ubuntu-26.04-server-cloudimg-amd64.img \
      --memory 2G --disk 10G --name chisel-dev \
      --cloud-init cloud-init-local-cache.yaml --timeout 900
-
-   # Apple Silicon / arm64 hosts: use ubuntu-26.04-server-cloudimg-arm64.img
    ```
 3. Wait for setup and enter:
    ```bash
@@ -385,6 +420,14 @@ Practicalities:
   its `origin` points at the LAN mirror.
 * **Version drift:** re-run §3.2 close to the event; don't reuse months-old
   snap bundles.
+* **Multipass rewrites `http://` to `https://`** for image and `--cloud-init`
+  URLs (observed on 1.17): a plain-HTTP cache server can't be used directly
+  in `multipass launch`. Always download first (curl/browser) and launch
+  from `file://`.
+* **`cloud-init status` shows `error` on a WAN-less LAN** — the stock image's
+  own apt/`pollinate` step fails offline; harmless and does not affect the
+  setup. Judge readiness by `~/.workshop-ready`, and set participant
+  expectations accordingly.
 * **Firewall/permissions on the cache machine** — test from a *different*
   device, not just localhost.
 * If the venue LAN does provide some WAN, keep the original

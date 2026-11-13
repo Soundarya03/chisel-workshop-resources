@@ -57,29 +57,47 @@ Verify with `multipass version`, then proceed to Step 3.
 
 ### Step 3: Set up your dev environment with Multipass. We'll be working within this.
 
-This has been made simple by using cloud-init (if you're curious, see [here](https://github.com/canonical/cloud-init)). Everything the VM needs (tools, repos and this workshop's session content itself) is installed automatically, straight from the local cache. All you've got to do is run one command in your terminal:
+This has been made simple by using cloud-init (if you're curious, see [here](https://github.com/canonical/cloud-init)). Everything the VM needs (tools, repos and this workshop's session content itself) is installed automatically, straight from the local cache.
+
+#### Step 3.1: First, download the VM image and the cloud-init file from the cache (quick, since it's all local):
 
 **On Intel/AMD machines** (Windows, most Linux laptops, Intel Macs):
 
 ```bash
-multipass launch http://<cache-ip>:8000/images/ubuntu-26.04-server-cloudimg-amd64.img \
-  --memory 2G --disk 10G --name chisel-workshop \
-  --cloud-init http://<cache-ip>:8000/cloud-init-local-cache.yaml \
-  --timeout 900
+curl -fLO http://<cache-ip>:8000/images/ubuntu-26.04-server-cloudimg-amd64.img
 ```
 
-**On Apple Silicon Macs** — the same command, but with the arm64 image:
+**On Apple Silicon Macs:**
 
 ```bash
-multipass launch http://<cache-ip>:8000/images/ubuntu-26.04-server-cloudimg-arm64.img \
+curl -fLO http://<cache-ip>:8000/images/ubuntu-26.04-server-cloudimg-arm64.img
+```
+
+**Everyone** (on Windows, a browser download works just as well):
+
+```bash
+curl -fLO http://<cache-ip>:8000/cloud-init-local-cache.yaml
+```
+
+#### Step 3.2: Then, from the same directory, launch the VM:
+
+```bash
+# Intel/AMD. Apple Silicon: use the arm64 .img filename you downloaded.
+multipass launch file://$PWD/ubuntu-26.04-server-cloudimg-amd64.img \
   --memory 2G --disk 10G --name chisel-workshop \
-  --cloud-init http://<cache-ip>:8000/cloud-init-local-cache.yaml \
+  --cloud-init cloud-init-local-cache.yaml \
   --timeout 900
 ```
 
-> **On Windows (PowerShell):** write the command on a single line, i.e. without the `\` continuations.
+> Why download first? Multipass 1.17 rewrites `http://` URLs to `https://`
+> when you pass them to `launch`, and a plain local HTTP server can't answer
+> TLS. Launching from `file://` sidesteps that completely.
+>
+> **On Windows (PowerShell):** write the launch command on a single line
+> (no `\` continuations), and point `file://` at the full path where you
+> saved the image, e.g. `file://C:/Users/you/Downloads/ubuntu-26.04-....img`.
 
-This pulls the VM image from the cache and kicks off the automatic setup. If Multipass reports a timeout, don't worry — the setup keeps running in the background.
+This kicks off the automatic setup. If Multipass reports a timeout, don't worry. The setup keeps running in the background.
 
 **Wait for the setup to finish** (a few minutes), then shell into the VM:
 
@@ -87,6 +105,11 @@ This pulls the VM image from the cache and kicks off the automatic setup. If Mul
 multipass exec chisel-workshop -- cloud-init status --wait
 multipass shell chisel-workshop
 ```
+
+> With no internet access, `cloud-init status` may report `error` — that's
+> the VM image's own optional apt step failing to reach the Ubuntu archive;
+> it does **not** affect the workshop setup. The reliable readiness check is
+> the marker file in the next step.
 
 **Check that everything is ready** — inside the VM:
 
@@ -103,7 +126,7 @@ You're all set — everything from here on happens inside this VM.
 ---
 
 
-Setting up before the event, or have solid internet anyway? Use the online variant instead — no cache needed:
+### Setting up before the event, or have solid internet anyway? For Step 3, use this online variant instead:
 
 ```bash
 multipass launch 26.04 --memory 2G --disk 10G --name chisel-workshop \
@@ -113,4 +136,4 @@ multipass launch 26.04 --memory 2G --disk 10G --name chisel-workshop \
 
 ---
 
-Organizers: see `setup/LOCAL-CACHE.md` for what resources to prep on the local cache and how.
+**Organizers**: see `setup/LOCAL-CACHE.md` for what resources to prep on the local cache and how.

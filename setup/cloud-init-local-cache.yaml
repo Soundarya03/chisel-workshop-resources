@@ -26,6 +26,13 @@
 #   /var/log/cloud-init-output.log   (inside the VM)
 # =============================================================================
 
+# The stock image tries to `apt-get update` and install the 'pollinate'
+# package during first boot; with no WAN that fails and makes
+# `cloud-init status` report "error" even when our setup succeeded.
+package_update: false
+package_upgrade: false
+packages: []
+
 write_files:
   - path: /usr/local/bin/chisel-workshop-setup.sh
     permissions: "0755"
@@ -35,7 +42,9 @@ write_files:
 
       CACHE_BASE="http://REPLACE_WITH_CACHE_IP:8000"
       ARCH="$(dpkg --print-architecture)"   # amd64 | arm64
-      WORK="$(mktemp -d)"
+      # NOTE: /tmp is a small tmpfs in these VMs (~1 GB at 2 GB RAM); the snap
+      # bundle alone is larger. Keep the workspace on the root filesystem.
+      WORK="$(mktemp -d -p /var/tmp)"
 
       fetch() { # fetch <path-on-cache> <output-file>
         echo ">> downloading $CACHE_BASE/$1"
@@ -63,25 +72,48 @@ write_files:
       snap install ./docker.snap
       snap install ./chisel.snap
 
-      echo "==> [2/4] LXD init + cached base image(s) for rockcraft"
+      echo "==> [2/4] LXD init + pre-baked rockcraft base environment"
       lxd init --auto
+      # Seed a fully set-up rockcraft base instance, offline. Craft-providers
+      # launches buildd images by alias from a remote (needs network), but it
+      # REUSES an existing base instance when it is STOPPED and marked
+      # FINISHED -- no image resolution, no setup traffic. The image plus the
+      # exact instance name/fingerprint are harvested on a golden VM (see
+      # setup/LOCAL-CACHE.md) and recorded in manifest.txt.
       if fetch "lxd-images/$ARCH/manifest.txt" "$WORK/lxd-manifest.txt"; then
-        while read -r fname alias; do
-          [ -n "$fname" ] || continue
-          fetch "lxd-images/$ARCH/$fname" "$WORK/$fname"
-          lxc image import "$WORK/$fname" --alias "$alias" \
-            || echo "WARNING: could not import LXD image $fname"
-        done < "$WORK/lxd-manifest.txt"
+        # shellcheck disable=SC1091
+        . "$WORK/lxd-manifest.txt"
+        fetch "lxd-images/$ARCH/$ROCKCRAFT_BASE_IMAGE_FILE" \
+              "$WORK/$ROCKCRAFT_BASE_IMAGE_FILE"
+        # A manually created project gets an empty default profile, so
+        # replicate the devices craft-providers would use (verified):
+        lxc project create rockcraft 2>/dev/null || true
+        lxc profile device add default root disk pool=default path=/ \
+            --project rockcraft 2>/dev/null || true
+        lxc profile device add default eth0 nic name=eth0 network=lxdbr0 \
+            --project rockcraft 2>/dev/null || true
+        lxc image import "$WORK/$ROCKCRAFT_BASE_IMAGE_FILE" --project rockcraft
+        # init (not launch): the reuse check wants the instance STOPPED.
+        lxc --project rockcraft init "$ROCKCRAFT_BASE_IMAGE_FINGERPRINT" \
+            "$ROCKCRAFT_BASE_INSTANCE_NAME" \
+            --config $'raw.idmap=uid 1000 0\ngid 1000 0' \
+            --config security.syscalls.intercept.mknod=true
+        lxc config set "$ROCKCRAFT_BASE_INSTANCE_NAME" \
+            user.craft_providers.status=FINISHED --project rockcraft
       else
-        echo "   (no cached LXD images on the server; first 'rockcraft pack'"
-        echo "    of a given base will need network access)"
+        echo "   (no baked rockcraft base on the server; instance creation for"
+        echo "    'rockcraft pack' will need network access)"
       fi
 
-      echo "==> [3/4] Docker group setup"
+      echo "==> [3/4] Docker group setup + LXD/Docker firewall fix"
       addgroup --system docker || true
       adduser ubuntu docker
       snap disable docker
       snap enable docker
+      # Allow LXD container traffic through Docker's FORWARD DROP policy,
+      # now and on every boot (rockcraft builds fail without this).
+      systemctl daemon-reload
+      systemctl enable --now lxd-docker-forward.service
 
       echo "==> [4/4] Git repos from the local mirrors"
       sudo -u ubuntu git clone "$CACHE_BASE/git/chisel-releases.git" \
@@ -89,8 +121,52 @@ write_files:
       sudo -u ubuntu git clone "$CACHE_BASE/git/chisel-workshop-resources.git" \
           /home/ubuntu/chisel-workshop-resources
 
+      # Clean up the download workspace (can be >2 GB).
+      rm -rf "$WORK"
+
       sudo -u ubuntu touch /home/ubuntu/.workshop-ready
       echo "==> Workshop VM is ready."
+  # Docker's dockerd sets the iptables FORWARD policy to DROP, which kills
+  # NAT for LXD containers. Allow lxdbr0 traffic via the DOCKER-USER chain
+  # (the user-rule chain Docker never touches), re-applied on every boot by
+  # the systemd unit below.
+  - path: /usr/local/sbin/allow-lxd-through-docker.sh
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      # Allow LXD bridge traffic through Docker's FORWARD DROP policy.
+      # Idempotent; retries while dockerd finishes creating the DOCKER-USER chain.
+      set -u
+
+      IFACE="lxdbr0"
+
+      add_rule() {  # add_rule <-i|-o>
+        for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+          iptables -C DOCKER-USER "$1" "$IFACE" -j ACCEPT 2>/dev/null && return 0
+          iptables -I DOCKER-USER "$1" "$IFACE" -j ACCEPT 2>/dev/null && return 0
+          sleep 5
+        done
+        echo "WARNING: could not add DOCKER-USER $1 $IFACE rule" >&2
+        return 1
+      }
+
+      add_rule -i
+      add_rule -o
+  - path: /etc/systemd/system/lxd-docker-forward.service
+    content: |
+      [Unit]
+      Description=Allow LXD bridge (lxdbr0) traffic through Docker's FORWARD DROP policy
+      After=snap.docker.dockerd.service
+      Wants=snap.docker.dockerd.service
+      PartOf=snap.docker.dockerd.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/local/sbin/allow-lxd-through-docker.sh
+
+      [Install]
+      WantedBy=multi-user.target
 
 runcmd:
   - /usr/local/bin/chisel-workshop-setup.sh

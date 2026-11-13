@@ -18,6 +18,9 @@
 #   - docker snap, with the ubuntu user in the docker group and the daemon
 #     restarted (equivalent of the manual disable/enable dance)
 #   - chisel snap
+#   - a persistent fix for the Docker-vs-LXD firewall conflict (Docker's
+#     FORWARD DROP policy otherwise breaks networking in LXD containers,
+#     which makes rockcraft builds fail with "no network access")
 #   - a clone of github.com/canonical/chisel-releases in ~/chisel-releases
 #   - a clone of this workshop repo (setup/ + session_content/) in
 #     ~/chisel-workshop-resources
@@ -27,6 +30,49 @@
 #     on slow conference links; even if it trips, cloud-init keeps running
 #     in the background (check: multipass exec chisel-dev -- cloud-init status).
 # =============================================================================
+
+write_files:
+  # Docker's dockerd sets the iptables FORWARD policy to DROP, which kills
+  # NAT for LXD containers. Allow lxdbr0 traffic via the DOCKER-USER chain
+  # (the user-rule chain Docker never touches), re-applied on every boot by
+  # the systemd unit below.
+  - path: /usr/local/sbin/allow-lxd-through-docker.sh
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      # Allow LXD bridge traffic through Docker's FORWARD DROP policy.
+      # Idempotent; retries while dockerd finishes creating the DOCKER-USER chain.
+      set -u
+
+      IFACE="lxdbr0"
+
+      add_rule() {  # add_rule <-i|-o>
+        for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+          iptables -C DOCKER-USER "$1" "$IFACE" -j ACCEPT 2>/dev/null && return 0
+          iptables -I DOCKER-USER "$1" "$IFACE" -j ACCEPT 2>/dev/null && return 0
+          sleep 5
+        done
+        echo "WARNING: could not add DOCKER-USER $1 $IFACE rule" >&2
+        return 1
+      }
+
+      add_rule -i
+      add_rule -o
+  - path: /etc/systemd/system/lxd-docker-forward.service
+    content: |
+      [Unit]
+      Description=Allow LXD bridge (lxdbr0) traffic through Docker's FORWARD DROP policy
+      After=snap.docker.dockerd.service
+      Wants=snap.docker.dockerd.service
+      PartOf=snap.docker.dockerd.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/local/sbin/allow-lxd-through-docker.sh
+
+      [Install]
+      WantedBy=multi-user.target
 
 snap:
   commands:
@@ -47,6 +93,10 @@ runcmd:
   - adduser ubuntu docker
   - snap disable docker
   - snap enable docker
+  # Allow LXD container traffic through Docker's FORWARD DROP policy, now and
+  # on every boot (rockcraft builds fail without this).
+  - systemctl daemon-reload
+  - systemctl enable --now lxd-docker-forward.service
   # Workshop material, cloned as the ubuntu user so ownership is correct.
   - sudo -u ubuntu git clone https://github.com/canonical/chisel-releases.git /home/ubuntu/chisel-releases
   # This workshop repo itself (setup/, session_content/).
