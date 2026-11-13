@@ -396,6 +396,10 @@ Practicalities:
    ```
 4. Verify: `snap list`, `docker ps`, `lxc list`, `chisel --version`,
    `ls ~/chisel-releases`, and `ls ~/chisel-workshop-resources/session_content`.
+5. Remind participants: `rockcraft pack` and `chisel cut` still need
+   **internet at build time** (OCI base image from `public.ecr.aws`, plus
+   the apt archive). Only instance creation is offline via the baked base
+   (§1.4). Plan for proxies (OCI registry and apt cache) if you want it fully offline.
 
 ---
 

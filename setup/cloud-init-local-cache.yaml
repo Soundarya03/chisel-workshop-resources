@@ -22,6 +22,12 @@
 #   multipass exec chisel-dev -- cloud-init status --wait
 #   multipass shell chisel-dev        # done when ~/.workshop-ready exists
 #
+# NOTE: this sets the VM up fully offline, including the rockcraft base
+# environment. Building rocks still needs internet access at build time --
+# the OCI base image pull (public.ecr.aws) and the apt archive (also used by
+# 'chisel cut') -- unless the cache also provides an OCI registry mirror and
+# an apt proxy.
+#
 # If anything goes wrong, the setup log is at:
 #   /var/log/cloud-init-output.log   (inside the VM)
 # =============================================================================

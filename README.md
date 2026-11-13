@@ -123,6 +123,12 @@ ls ~/chisel-releases ~/chisel-workshop-resources/session_content
 
 You're all set — everything from here on happens inside this VM.
 
+> **Heads-up: building needs internet.** The setup above has been designed to
+> get as much done offline as possible, but actual building of rocks, i,e `rockcraft pack` 
+> pulls an OCI base image(from `public.ecr.aws`) and Ubuntu packages (via apt) at build time, 
+> and `chisel cut` downloads packages too. Those two are **not** on the local
+> cache, so you'll need working internet once you reach the build exercises.
+
 ---
 
 
