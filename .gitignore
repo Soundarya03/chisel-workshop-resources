@@ -1,0 +1,8 @@
+# IDE / editor
+.idea/
+*.swp
+*~
+
+# OS noise
+.DS_Store
+Thumbs.db

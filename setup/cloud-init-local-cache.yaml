@@ -1,0 +1,96 @@
+#cloud-config
+# =============================================================================
+# Chisel workshop - one-step VM setup (LOCAL CACHE / conference Wi-Fi version)
+#
+# Everything this VM needs is fetched from a plain HTTP cache server on the
+# conference LAN. No WAN/internet access is required inside the VM.
+#
+# ORGANIZERS, before distributing:
+#   1) Replace REPLACE_WITH_CACHE_IP below with the cache server's LAN address.
+#   2) Host this edited file on the cache server
+#      (see setup/LOCAL-CACHE.md in the workshop repo).
+#
+# PARTICIPANTS run on their host (image also comes from the cache):
+#
+#   # Intel/AMD hosts:
+#   multipass launch http://<cache-ip>:8000/images/ubuntu-26.04-server-cloudimg-amd64.img \
+#       --memory 2G --disk 10G --name chisel-dev \
+#       --cloud-init cloud-init-local-cache.yaml --timeout 900
+#
+#   # Apple Silicon (arm64) hosts: use .../ubuntu-26.04-server-cloudimg-arm64.img
+#
+#   multipass exec chisel-dev -- cloud-init status --wait
+#   multipass shell chisel-dev        # done when ~/.workshop-ready exists
+#
+# If anything goes wrong, the setup log is at:
+#   /var/log/cloud-init-output.log   (inside the VM)
+# =============================================================================
+
+write_files:
+  - path: /usr/local/bin/chisel-workshop-setup.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      CACHE_BASE="http://REPLACE_WITH_CACHE_IP:8000"
+      ARCH="$(dpkg --print-architecture)"   # amd64 | arm64
+      WORK="$(mktemp -d)"
+
+      fetch() { # fetch <path-on-cache> <output-file>
+        echo ">> downloading $CACHE_BASE/$1"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-connrefused \
+             -o "$2" "$CACHE_BASE/$1"
+      }
+
+      echo "==> [1/4] Snaps (arch: $ARCH)"
+      fetch "snaps/snaps-$ARCH.tar.gz" "$WORK/snaps.tar.gz"
+      mkdir -p "$WORK/snaps"
+      tar -xzf "$WORK/snaps.tar.gz" -C "$WORK/snaps"
+      cd "$WORK/snaps"
+      # Assertions make these trusted installs (no --dangerous needed).
+      for a in ./*.assert; do snap ack "$a"; done
+      # Order matters: snapd runtime, then base snaps, then the tools.
+      if [ -f ./snapd.snap ]; then
+        snap install ./snapd.snap
+      fi
+      for base in ./bare.snap ./core*.snap; do
+        [ -e "$base" ] || continue
+        snap install "$base" || echo "WARNING: failed to install base $base"
+      done
+      snap install ./lxd.snap
+      snap install --classic ./rockcraft.snap
+      snap install ./docker.snap
+      snap install ./chisel.snap
+
+      echo "==> [2/4] LXD init + cached base image(s) for rockcraft"
+      lxd init --auto
+      if fetch "lxd-images/$ARCH/manifest.txt" "$WORK/lxd-manifest.txt"; then
+        while read -r fname alias; do
+          [ -n "$fname" ] || continue
+          fetch "lxd-images/$ARCH/$fname" "$WORK/$fname"
+          lxc image import "$WORK/$fname" --alias "$alias" \
+            || echo "WARNING: could not import LXD image $fname"
+        done < "$WORK/lxd-manifest.txt"
+      else
+        echo "   (no cached LXD images on the server; first 'rockcraft pack'"
+        echo "    of a given base will need network access)"
+      fi
+
+      echo "==> [3/4] Docker group setup"
+      addgroup --system docker || true
+      adduser ubuntu docker
+      snap disable docker
+      snap enable docker
+
+      echo "==> [4/4] Git repos from the local mirrors"
+      sudo -u ubuntu git clone "$CACHE_BASE/git/chisel-releases.git" \
+          /home/ubuntu/chisel-releases
+      sudo -u ubuntu git clone "$CACHE_BASE/git/chisel-workshop-resources.git" \
+          /home/ubuntu/chisel-workshop-resources
+
+      sudo -u ubuntu touch /home/ubuntu/.workshop-ready
+      echo "==> Workshop VM is ready."
+
+runcmd:
+  - /usr/local/bin/chisel-workshop-setup.sh

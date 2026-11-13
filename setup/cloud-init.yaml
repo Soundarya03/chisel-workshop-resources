@@ -1,0 +1,55 @@
+#cloud-config
+# =============================================================================
+# Chisel workshop - one-step VM setup (ONLINE version)
+#
+# This replaces the whole manual setup list. A participant only runs:
+#
+#   multipass launch 26.04 \
+#       --memory 2G --disk 10G \
+#       --name chisel-dev \
+#       --cloud-init cloud-init.yaml \
+#       --timeout 900
+#   multipass exec chisel-dev -- cloud-init status --wait   # optional watch
+#   multipass shell chisel-dev
+#
+# When cloud-init reports "done" (or ~/.workshop-ready exists) the VM has:
+#   - lxd snap, initialised (lxd init --auto)
+#   - rockcraft snap (--classic)
+#   - docker snap, with the ubuntu user in the docker group and the daemon
+#     restarted (equivalent of the manual disable/enable dance)
+#   - chisel snap
+#   - a clone of github.com/canonical/chisel-releases in ~/chisel-releases
+#   - a clone of this workshop repo (setup/ + session_content/) in
+#     ~/chisel-workshop-resources
+#
+# Notes:
+#   --timeout 900 guards against multipass' default 5-minute init timeout
+#     on slow conference links; even if it trips, cloud-init keeps running
+#     in the background (check: multipass exec chisel-dev -- cloud-init status).
+# =============================================================================
+
+snap:
+  commands:
+    # Ensure snapd has finished seeding the image before hitting the store.
+    # Then ensure we have all the snaps we need: lxd, rockcraft, docker, chisel.
+    - [snap, wait, system, seed.loaded]
+    - [snap, install, lxd]
+    - [snap, install, rockcraft, --classic]
+    - [snap, install, docker]
+    - [snap, install, chisel]
+
+runcmd:
+  # LXD must be initialised before rockcraft can create build environments.
+  - lxd init --auto
+  # Docker: let the default ubuntu user reach the daemon socket, then restart
+  # the snap (mirrors the manual "snap disable/enable docker" workaround).
+  - addgroup --system docker
+  - adduser ubuntu docker
+  - snap disable docker
+  - snap enable docker
+  # Workshop material, cloned as the ubuntu user so ownership is correct.
+  - sudo -u ubuntu git clone https://github.com/canonical/chisel-releases.git /home/ubuntu/chisel-releases
+  # This workshop repo itself (setup/, session_content/).
+  - sudo -u ubuntu git clone https://github.com/Soundarya03/chisel-workshop-resources.git /home/ubuntu/chisel-workshop-resources
+  # Readiness marker for participants/TAs.
+  - sudo -u ubuntu touch /home/ubuntu/.workshop-ready
