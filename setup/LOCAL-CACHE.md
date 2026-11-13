@@ -162,6 +162,22 @@ Total size: roughly **4–5 GB** for both architectures plus all installers.
 
 ## 3. Preparation (run ahead of the event, with good internet)
 
+**How to run this section:** everything here needs decent internet.
+
+* **§3.1, §3.4 and §3.5** can run as-is on any Linux machine with `curl`,
+  `git` and `snapd` (including the cache server itself). They create and
+  populate `chisel-workshop-cache/` in the current directory.
+* **§3.2 and §3.3** must each be run **once per architecture** (amd64 *and*
+  arm64, if we want to support both kinds of participant devices) inside a **disposable VM** 
+  — they install snaps and run `rockcraft pack` as part of the process, so don't run them 
+  on a system you care about. A Multipass VM is ideal (`multipass launch 26.04 --name prep`;
+  on an Apple Silicon Mac that gives you arm64 for free). Move the outputs
+  into place afterwards: `snaps-<arch>.tar.gz` → `chisel-workshop-cache/snaps/`
+  and `lxd-images/<arch>/` → `chisel-workshop-cache/lxd-images/`.
+* Two finishing steps live outside this section: copy the
+  `cloud-init-local-cache.yaml` **with `CACHE_BASE` replaced by the server's
+  IP** into the cache root (see §2), and serve the directory (see §4).
+
 ### 3.1 Installers and VM images
 
 ```bash
@@ -233,8 +249,11 @@ Notes:
 
 ### 3.3 Pre-baked rockcraft base instance image
 
-On a golden VM of the target architecture (§3.2 doubles as one), with
-internet:
+On a golden VM of the target architecture, with internet. The easiest golden
+VM is one launched with the **online** cloud-init (`setup/cloud-init.yaml`) —
+it installs the tools, runs `lxd init --auto` and applies the Docker/LXD
+firewall fix, without which `rockcraft pack` fails (no network in LXD
+containers). Then:
 
 1. Run a minimal `rockcraft pack` once — this creates and sets up the base
    instance in the `rockcraft` LXD project:
@@ -315,6 +334,9 @@ git -C chisel-workshop-cache/git/chisel-workshop-resources.git update-server-inf
 cd chisel-workshop-cache
 find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
 ```
+
+Re-run this after any late edits — notably the `CACHE_BASE` edit to
+`cloud-init-local-cache.yaml`, which typically happens on the day itself.
 
 ---
 
