@@ -35,11 +35,11 @@ sudo snap install multipass
 
 **Windows**
 
-Download `multipass-1.17.0+win-win64.msi` from the [Multipass releases page](https://github.com/canonical/multipass/releases/latest) and run the installer (administrator rights required). Open a **new** terminal afterwards, so that `multipass` is on your `PATH`.
+Download `multipass-1.17.1+win-win64.msi` from the [Multipass releases page](https://github.com/canonical/multipass/releases/latest) and run the installer (administrator rights required). Open a **new** terminal afterwards, so that `multipass` is on your `PATH`.
 
 **macOS**
 
-Download `multipass-1.17.0+mac-Darwin.pkg` from the [Multipass releases page](https://github.com/canonical/multipass/releases/latest) and run the installer package.
+Download `multipass-1.17.1+mac-Darwin.pkg` from the [Multipass releases page](https://github.com/canonical/multipass/releases/latest) and run the installer package.
 
 Verify with `multipass version`, then proceed to Step 3.
 
@@ -95,11 +95,11 @@ sudo snap install multipass.snap
 
 **Windows**
 
-Download `http://<cache-ip>:8000/installers/multipass-1.17.0+win-win64.msi` in your browser and run the installer (administrator rights required). Open a **new** terminal afterwards.
+Download `http://<cache-ip>:8000/installers/multipass-1.17.1+win-win64.msi` in your browser and run the installer (administrator rights required). Open a **new** terminal afterwards.
 
 **macOS**
 
-Download `http://<cache-ip>:8000/installers/multipass-1.17.0+mac-Darwin.pkg` in your browser and run the installer package.
+Download `http://<cache-ip>:8000/installers/multipass-1.17.1+mac-Darwin.pkg` in your browser and run the installer package.
 
 ### Launch the VM from the cache (replaces Step 3)
 

@@ -37,12 +37,12 @@ known, and host the edited copy on the server itself (cache root, see §2).
 
 | Artifact | File | Source (canonical URL) | Approx. size |
 |---|---|---|---|
-| Windows installer (x86_64) | `multipass-1.17.0+win-win64.msi` | `https://github.com/canonical/multipass/releases/download/v1.17.0/multipass-1.17.0%2Bwin-win64.msi` | ~78 MB |
-| macOS installer (universal pkg) | `multipass-1.17.0+mac-Darwin.pkg` | `https://github.com/canonical/multipass/releases/download/v1.17.0/multipass-1.17.0%2Bmac-Darwin.pkg` | ~162 MB |
+| Windows installer (x86_64) | `multipass-1.17.1+win-win64.msi` | `https://github.com/canonical/multipass/releases/download/v1.17.1/multipass-1.17.1%2Bwin-win64.msi` | ~78 MB |
+| macOS installer (universal pkg) | `multipass-1.17.1+mac-Darwin.pkg` | `https://github.com/canonical/multipass/releases/download/v1.17.1/multipass-1.17.1%2Bmac-Darwin.pkg` | ~162 MB |
 | Linux snap (amd64) | `multipass.snap` + `multipass.assert` | `snap download multipass` (see §3.1) | see download |
 | Linux snap (arm64) — only if ARM-Linux attendees are expected | same, run on arm64 | `snap download multipass` on arm64 | see download |
 
-> Pin everyone to the same Multipass version (1.17.0 at time of writing).
+> Pin everyone to the same Multipass version (1.17.1 at time of writing).
 > `multipass launch` from a custom image URL and `--cloud-init` are exercised
 > heavily here; a single known-good version removes a whole class of
 > "works on my machine" issues.
@@ -134,8 +134,8 @@ organizers run caches for several sessions/speakers) that ends up like this:
 ```
 chisel-workshop-cache/
 ├── installers/
-│   ├── multipass-1.17.0+win-win64.msi
-│   ├── multipass-1.17.0+mac-Darwin.pkg
+│   ├── multipass-1.17.1+win-win64.msi
+│   ├── multipass-1.17.1+mac-Darwin.pkg
 │   └── linux/
 │       ├── amd64/  (multipass.snap + multipass.assert)
 │       └── arm64/  (same, if needed)
@@ -183,8 +183,8 @@ Total size: roughly **4–5 GB** for both architectures plus all installers.
 ```bash
 mkdir -p chisel-workshop-cache/installers/linux/amd64 chisel-workshop-cache/images
 cd chisel-workshop-cache/installers
-curl -fLO "https://github.com/canonical/multipass/releases/download/v1.17.0/multipass-1.17.0%2Bwin-win64.msi"
-curl -fLO "https://github.com/canonical/multipass/releases/download/v1.17.0/multipass-1.17.0%2Bmac-Darwin.pkg"
+curl -fLO "https://github.com/canonical/multipass/releases/download/v1.17.1/multipass-1.17.1%2Bwin-win64.msi"
+curl -fLO "https://github.com/canonical/multipass/releases/download/v1.17.1/multipass-1.17.1%2Bmac-Darwin.pkg"
 
 cd linux/amd64        # repeat in an arm64 dir on an arm64 machine if needed
 snap download multipass
