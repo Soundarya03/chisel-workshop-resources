@@ -1,0 +1,115 @@
+# Copyright 2024 Canonical Ltd.
+# See LICENSE-rock file for licensing details.
+---
+name: valkey-chiseled
+base: bare
+build-base: ubuntu@26.04
+
+version: "9.0.4"
+summary: Valkey Chiseled ROCK OCI
+description: |
+  Valkey is an open source (BSD) high-performance key-value datastore.
+  This chiseled rock provides a container image for Valkey 9.0 on
+  Ubuntu 26.04, aligned with the upstream Docker image.
+license: Apache-2.0
+platforms:
+  amd64:
+  arm64:
+
+services:
+  valkey:
+    override: replace
+    startup: enabled
+    summary: Start Valkey
+    command: /usr/local/bin/docker-entrypoint.sh [ valkey-server ]
+    working-dir: /data
+    on-success: shutdown
+    on-failure: shutdown
+
+environment:
+  VALKEY_VERSION: "9.0.4"
+  PEBBLE_VERBOSE: "1"
+  # The bare base has no locale data; use the C locale to avoid a
+  # "Failed to configure LOCALE" warning from valkey-server.
+  LC_ALL: C
+
+# The valkey-server and valkey-tools slice definitions live in a local
+# Chisel release checkout (the feat/valkey-sdf branch of chisel-releases).
+# Copy it as chisel-releases/ next to this file before building (managed
+# builds can only see sources inside the project directory):
+#
+#   cp -a /path/to/chisel-releases ./chisel-releases
+#
+# Once the slices are merged upstream, replace the build-context part's
+# chisel cut with stage-packages: [valkey-server_bins, tzdata_etc] and
+# drop the source / override-build keys.
+parts:
+  # The slice set covers the server plus everything docker-entrypoint.sh
+  # needs on a bare base: a shell (/bin/sh), grep, find, chown, id, setpriv,
+  # and passwd/group databases for the valkey user created below.
+  build-context:
+    plugin: nil
+    source: chisel-releases/
+    source-type: local
+    override-build: |
+      chisel cut --release ./ --root "${CRAFT_PART_INSTALL}" \
+        base-files_chisel \
+        base-files_base \
+        base-passwd_data \
+        dash_bins \
+        grep_bins \
+        findutils_find \
+        coreutils_chown \
+        coreutils_id-bin \
+        util-linux_process \
+        valkey-server_bins \
+        tzdata_etc
+
+  valkey:
+    plugin: nil
+    after: [build-context]
+    override-stage: |
+      craftctl default
+      # stay under 80 chars
+      lib_path="${CRAFT_STAGE}/usr/lib/${CRAFT_ARCH_TRIPLET_BUILD_FOR}"
+      lib_path="${lib_path}:${CRAFT_STAGE}/usr/lib"
+      actual=$(LD_LIBRARY_PATH="${lib_path}" \
+        "${CRAFT_STAGE}/usr/bin/valkey-server" --version \
+        | grep -oP '(?<=v=)[0-9.]+')
+      if [ "$actual" != "$CRAFT_PROJECT_VERSION" ]; then
+        echo "ERROR: binary version ($actual) does not match" \
+          "declared version ($CRAFT_PROJECT_VERSION)"
+        exit 1
+      fi
+      echo "Version check passed: $actual"
+    override-prime: |
+      craftctl default
+      rm -rf "${CRAFT_PRIME}/etc/valkey"
+
+  # A bare base has no system to overlay onto, so overlays are not allowed.
+  # Mutate the primed rootfs directly instead; after: [build-context]
+  # guarantees base-passwd_data has delivered /etc/passwd and /etc/group.
+  user:
+    plugin: nil
+    after: [build-context]
+    override-prime: |
+      craftctl default
+      groupadd --root "${CRAFT_PRIME}" -r valkey --gid=999
+      useradd --root "${CRAFT_PRIME}" -r -g valkey --uid=999 \
+        --home-dir /data --shell /bin/bash valkey
+      rm -f "${CRAFT_PRIME}/etc/passwd-" "${CRAFT_PRIME}/etc/group-"
+      mkdir -p "${CRAFT_PRIME}/data" \
+        "${CRAFT_PRIME}/run/valkey"
+      chmod 1777 "${CRAFT_PRIME}/data" \
+        "${CRAFT_PRIME}/run/valkey"
+      chown 999:999 "${CRAFT_PRIME}/data" \
+        "${CRAFT_PRIME}/run/valkey"
+  docker-entrypoint:
+    plugin: dump
+    source: local
+    organize:
+      docker-entrypoint.sh: usr/local/bin/docker-entrypoint.sh
+    override-prime: |
+      craftctl default
+      chmod 0755 \
+        "${CRAFT_PRIME}/usr/local/bin/docker-entrypoint.sh"
