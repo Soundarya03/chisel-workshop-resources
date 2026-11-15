@@ -158,4 +158,19 @@ Then wait and verify exactly as in Step 3 above. Two offline-specific notes:
 
 ---
 
+## Teardown: cleaning up afterwards
+
+When you're done with the workshop (or want to start over with a fresh VM), delete the instance and reclaim its disk space:
+
+```bash
+multipass delete chisel-workshop
+multipass purge
+```
+
+`delete` marks the instance for deletion (it stays recoverable until you `purge`); `purge` removes it permanently, along with its disk image. To do both in one step: `multipass delete --purge chisel-workshop`.
+
+This only removes the VM. Anything you downloaded onto your host (the image file, the cloud-init file) can be deleted by hand if you wish, and Multipass itself can stay installed for future use.
+
+---
+
 Organizers: see `setup/LOCAL-CACHE.md` for what resources to prep on the local cache and how.
